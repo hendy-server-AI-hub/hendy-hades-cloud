@@ -1,8 +1,9 @@
-exports.getTasks = (req, res, next) => {
+// Lấy danh sách task hoặc trạng thái hệ thống
+const getTasks = (req, res, next) => {
     try {
         const tasks = [
-            { id: 1, title: 'Tối ưu hóa hệ thống API', status: 'completed' },
-            { id: 2, title: 'Đồng bộ hóa Telegram Webhook', status: 'pending' }
+            { id: 1, title: 'Network Latency Monitor', status: 'Active', ping: '12ms' },
+            { id: 2, title: 'Bot Account Management', status: 'Running', count: 1 }
         ];
         res.status(200).json({ success: true, data: tasks });
     } catch (error) {
@@ -10,18 +11,23 @@ exports.getTasks = (req, res, next) => {
     }
 };
 
-exports.createTask = (req, res, next) => {
+// Tạo task mới
+const createTask = (req, res, next) => {
     try {
-        const { title } = req.body;
+        const { title, description } = req.body;
         if (!title) {
-            const err = new Error('Tiêu đề task không được để trống!');
+            const err = new Error('Thiếu tiêu đề task bắt buộc!');
             err.statusCode = 400;
             throw err;
         }
-
-        const newTask = { id: Date.now(), title, status: 'pending' };
-        res.status(201).json({ success: true, message: 'Tạo task thành công', data: newTask });
+        res.status(201).json({ 
+            success: true, 
+            message: 'Đã tạo task thành công', 
+            data: { title, description, createdAt: new Date() } 
+        });
     } catch (error) {
         next(error);
     }
 };
+
+module.exports = { getTasks, createTask };
