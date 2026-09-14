@@ -1,30 +1,75 @@
-exports.handleTelegramWebhook = (req, res, next) => {
+const fs = require('fs');
+const path = require('path');
+
+const DB_FILE = path.join(__dirname, '../../database.json');
+
+function loadDB() {
+    try {
+        if (fs.existsSync(DB_FILE)) {
+            return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+        }
+    } catch (e) {}
+    return {};
+}
+
+function saveDB(data) {
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 4), 'utf8');
+    } catch (e) {}
+}
+
+// Xử lý Webhook từ Telegram (nếu cấu hình Webhook mode)
+const handleTelegramWebhook = (req, res, next) => {
     try {
         const update = req.body;
-        
-        if (!update || (!update.message && !update.callback_query)) {
-            const err = new Error('Dữ liệu Webhook Telegram không hợp lệ');
+        // Logic xử lý update từ Telegram Webhook ở đây
+        res.status(200).json({ success: true, message: 'Webhook received successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Xử lý đặt đơn dịch vụ mạng xã hội (SMM) qua API / Dashboard
+const processSMMOrder = (req, res, next) => {
+    try {
+        const { userId, serviceName, link, quantity, price } = req.body;
+        let users = loadDB();
+
+        if (!users[userId]) {
+            users[userId] = { name: 'Web User', balance: 50000, orders: [] };
+        }
+
+        const totalCost = quantity * price;
+        if (users[userId].balance < totalCost) {
+            const err = new Error('Số dư ví không đủ để thực hiện giao dịch!');
             err.statusCode = 400;
             throw err;
         }
 
-        const message = update.message || update.callback_query.message;
-        const text = message.text || '';
+        users[userId].balance -= totalCost;
+        const newOrder = {
+            id: 'ORD' + Math.floor(Math.random() * 90000 + 10000),
+            serviceName,
+            link,
+            quantity,
+            totalCost,
+            status: '✅ Đã hoàn thành',
+            date: new Date().toLocaleString('vi-VN')
+        };
 
-        console.log(`[TELEGRAM BOT] Nhận lệnh từ user: ${text}`);
-
-        let responseMessage = 'Đã tiếp nhận yêu cầu xử lý dịch vụ hệ thống của bạn.';
-        if (text.startsWith('/boost')) {
-            responseMessage = '🚀 Hệ thống đã ghi nhận đơn hàng tăng mắt xem livestream!';
-        }
+        if (!users[userId].orders) users[userId].orders = [];
+        users[userId].orders.push(newOrder);
+        saveDB(users);
 
         res.status(200).json({
             success: true,
-            method: 'sendMessage',
-            chat_id: message.chat.id,
-            text: responseMessage
+            message: 'Đặt đơn hàng mạng xã hội thành công!',
+            order: newOrder,
+            remainingBalance: users[userId].balance
         });
     } catch (error) {
         next(error);
     }
 };
+
+module.exports = { handleTelegramWebhook, processSMMOrder };
