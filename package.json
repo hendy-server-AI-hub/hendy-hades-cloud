@@ -1,12 +1,13 @@
 {
-  "name": "ecosystem-api",
+  "name": "hendy-bot-tele",
   "version": "1.0.0",
-  "description": "Ecosystem API with Express and Telegram Webhook",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.19.2",
+    "node-telegram-bot-api": "^0.65.1",
+    "ws": "^8.16.0"
   }
 }
