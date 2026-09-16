@@ -14,14 +14,13 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 const clients = new Set();
 const activeSlaves = new Map();
-const activeBots = new Map(); // Quản lý danh sách Bot động[cite: 1]
-const activeLiveMonitors = new Map(); // Quản lý các phiên Live Stream & Tăng tương tác
+const activeBots = new Map();
+const activeLiveMonitors = new Map();
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
-// Hàm hỗ trợ phát sóng dữ liệu đến tất cả Client WebSocket
 function broadcastToAll(data) {
     const payload = typeof data === 'string' ? data : JSON.stringify(data);
     wss.clients.forEach((client) => {
@@ -32,7 +31,7 @@ function broadcastToAll(data) {
 }
 
 // ==========================================
-// 🤖 AI MANAGER ENGINE (BỘ TRÍ TUỆ NHÂN TẠO QUẢN LÝ)[cite: 1]
+// 🤖 AI MANAGER ENGINE
 // ==========================================
 async function processAiManagerCommand(userPrompt, systemContext) {
     const prompt = userPrompt.toLowerCase().trim();
@@ -45,13 +44,13 @@ async function processAiManagerCommand(userPrompt, systemContext) {
                 body: JSON.stringify({
                     contents: [{
                         parts: [{
-                            text: `Bạn là AI Quản Lý Hệ Thống Hendy & Hades V6100 Pro.[cite: 1]
+                            text: `Bạn là AI Quản Lý Hệ Thống Hendy & Hades V6100 Pro. 
 Trạng thái hệ thống hiện tại: 
-- Số lượng Bot active: ${systemContext.botCount || 0}[cite: 1]
-- Số lượng Slave connected: ${systemContext.slaveCount || 0}[cite: 1]
+- Số lượng Bot active: ${systemContext.botCount || 0}
+- Số lượng Slave connected: ${systemContext.slaveCount || 0}
 - Số phiên Live đang mở: ${systemContext.liveCount || 0}
 
-Người dùng gửi câu lệnh: "${userPrompt}"[cite: 1]
+Người dùng gửi câu lệnh: "${userPrompt}"
 
 Hãy phân tích lệnh và trả về DUY NHẤT một chuỗi JSON theo định dạng chuẩn sau:
 {
@@ -71,73 +70,72 @@ Hãy phân tích lệnh và trả về DUY NHẤT một chuỗi JSON theo địn
                 return JSON.parse(cleanedJson);
             }
         } catch (err) {
-            console.error('[AI GEMINI ERROR]:', err);[cite: 1]
+            console.error('[AI GEMINI ERROR]:', err);
         }
     }
 
     let action = 'UNKNOWN';
-    let reply = '🤖 AI Quản lý chưa hiểu rõ yêu cầu. Bạn có thể thử: "Chạy tất cả bot", "Dừng bot", "Thêm 3 bot", "Tăng mắt live", "Xuất báo cáo", hoặc "Báo cáo trạng thái".';[cite: 1]
+    let reply = '🤖 AI Quản lý chưa hiểu rõ yêu cầu. Bạn có thể thử: "Chạy tất cả bot", "Dừng bot", "Thêm 3 bot", "Tăng mắt live", "Xuất báo cáo", hoặc "Báo cáo trạng thái".';
     let params = {};
 
     if (prompt.includes('chạy') || prompt.includes('bắt đầu') || prompt.includes('start')) {
-        action = 'START_ALL_BOTS';[cite: 1]
-        reply = '🚀 AI Manager đã phát lệnh kích hoạt TẤT CẢ các Bot trong hệ thống!';[cite: 1]
+        action = 'START_ALL_BOTS';
+        reply = '🚀 AI Manager đã phát lệnh kích hoạt TẤT CẢ các Bot trong hệ thống!';
     } else if (prompt.includes('dừng') || prompt.includes('stop') || prompt.includes('tắt')) {
-        action = 'STOP_ALL_BOTS';[cite: 1]
-        reply = '⏹ AI Manager đã tạm dừng hoạt động của tất cả các Bot!';[cite: 1]
+        action = 'STOP_ALL_BOTS';
+        reply = '⏹ AI Manager đã tạm dừng hoạt động của tất cả các Bot!';
     } else if (prompt.includes('thêm bot') || prompt.includes('tạo bot') || prompt.includes('add bot')) {
-        action = 'ADD_BOT';[cite: 1]
+        action = 'ADD_BOT';
         const match = prompt.match(/\d+/);
         const count = match ? parseInt(match[0]) : 1;
-        params = { count };[cite: 1]
-        reply = `➕ AI Manager đã thêm thành công ${count} tài khoản Bot mới vào Hub!`;[cite: 1]
+        params = { count };
+        reply = `➕ AI Manager đã thêm thành công ${count} tài khoản Bot mới vào Hub!`;
     } else if (prompt.includes('xuất') || prompt.includes('báo cáo') || prompt.includes('csv') || prompt.includes('download')) {
-        action = 'EXPORT_CSV';[cite: 1]
-        reply = '📥 AI Manager đã tạo và tải về tệp báo cáo danh sách Bot!';[cite: 1]
+        action = 'EXPORT_CSV';
+        reply = '📥 AI Manager đã tạo và tải về tệp báo cáo danh sách Bot!';
     } else if (prompt.includes('xóa log') || prompt.includes('dọn log') || prompt.includes('clear')) {
-        action = 'CLEAR_LOGS';[cite: 1]
-        reply = '🗑️ AI Manager đã dọn dẹp sạch sẽ toàn bộ nhật ký hệ thống.';[cite: 1]
+        action = 'CLEAR_LOGS';
+        reply = '🗑️ AI Manager đã dọn dẹp sạch sẽ toàn bộ nhật ký hệ thống.';
     } else if (prompt.includes('trạng thái') || prompt.includes('kiểm tra') || prompt.includes('status') || prompt.includes('sức khỏe')) {
-        action = 'SYSTEM_STATUS';[cite: 1]
-        reply = `📊 BÁO CÁO SỨC KHỎE HỆ THỐNG:\n- Số Slave đang kết nối: ${systemContext.slaveCount || 0}\n- Số Bot đang lưu trữ: ${systemContext.botCount || 0}\n- Số Phiên Live đang chạy: ${systemContext.liveCount || 0}\n- WebSocket Hub: ONLINE 🟢`;[cite: 1]
+        action = 'SYSTEM_STATUS';
+        reply = `📊 BÁO CÁO SỨC KHỎE HỆ THỐNG:\n- Số Slave đang kết nối: ${systemContext.slaveCount || 0}\n- Số Bot đang lưu trữ: ${systemContext.botCount || 0}\n- Số Phiên Live đang chạy: ${systemContext.liveCount || 0}\n- WebSocket Hub: ONLINE 🟢`;
     }
 
-    return { action, reply, params };[cite: 1]
+    return { action, reply, params };
 }
 
-// API Tiếp nhận lệnh từ AI Manager[cite: 1]
 app.post('/api/ai/manage', async (req, res) => {
     try {
-        const { prompt, context } = req.body;[cite: 1]
+        const { prompt, context } = req.body;
         if (!prompt) {
-            return res.status(400).json({ error: 'Vui lòng cung cấp câu lệnh' });[cite: 1]
+            return res.status(400).json({ error: 'Vui lòng cung cấp câu lệnh' });
         }
 
         const systemContext = {
-            slaveCount: activeSlaves.size,[cite: 1]
-            botCount: activeBots.size,[cite: 1]
+            slaveCount: activeSlaves.size,
+            botCount: activeBots.size,
             liveCount: activeLiveMonitors.size,
-            ...(context || {})[cite: 1]
+            ...(context || {})
         };
 
-        const result = await processAiManagerCommand(prompt, systemContext);[cite: 1]
+        const result = await processAiManagerCommand(prompt, systemContext);
 
         broadcastToAll({
-            type: 'AI_MANAGER_ACTION',[cite: 1]
-            action: result.action,[cite: 1]
-            params: result.params,[cite: 1]
-            sender: 'AI_SERVER'[cite: 1]
+            type: 'AI_MANAGER_ACTION',
+            action: result.action,
+            params: result.params,
+            sender: 'AI_SERVER'
         });
 
-        res.json({ success: true, data: result });[cite: 1]
+        res.json({ success: true, data: result });
     } catch (error) {
-        console.error('[AI API ERROR]:', error);[cite: 1]
-        res.status(500).json({ error: 'Lỗi xử lý AI Manager' });[cite: 1]
+        console.error('[AI API ERROR]:', error);
+        res.status(500).json({ error: 'Lỗi xử lý AI Manager' });
     }
 });
 
 // ==========================================
-// 🔴 LIVE STREAM & TIKTOK CONNECTOR ENGINE (TĂNG MẮT, TIM, FOLLOW, SHARE, COMMENT)
+// 🔴 LIVE STREAM & TIKTOK CONNECTOR ENGINE
 // ==========================================
 app.post('/api/live/start-boost', (req, res) => {
     try {
@@ -177,7 +175,6 @@ app.post('/api/live/start-boost', (req, res) => {
                     });
                 });
 
-                // 1. Tăng Mắt Live (Viewer Count)
                 tiktokConnection.on('roomUser', data => {
                     broadcastToAll({
                         type: 'LIVE_METRIC_UPDATE',
@@ -188,7 +185,6 @@ app.post('/api/live/start-boost', (req, res) => {
                     });
                 });
 
-                // 2. Tăng Tim TikTok (Likes)
                 tiktokConnection.on('like', data => {
                     broadcastToAll({
                         type: 'LIVE_METRIC_UPDATE',
@@ -200,7 +196,6 @@ app.post('/api/live/start-boost', (req, res) => {
                     });
                 });
 
-                // 3. Tăng Bình Luận TikTok (Comments)
                 tiktokConnection.on('chat', data => {
                     broadcastToAll({
                         type: 'LIVE_METRIC_UPDATE',
@@ -211,7 +206,6 @@ app.post('/api/live/start-boost', (req, res) => {
                     });
                 });
 
-                // 4 & 5. Tăng Follow & Share TikTok (Social Events)
                 tiktokConnection.on('social', data => {
                     let metricType = 'social';
                     if (data.displayType && data.displayType.includes('share')) {
@@ -252,7 +246,6 @@ app.post('/api/live/start-boost', (req, res) => {
                 console.error('[TIKTOK INIT ERROR]:', err);
             }
         } else {
-            // Nền tảng khác (YouTube, Facebook, Shopee, Bigo, v.v.) -> Mô phỏng / Điều phối Worker Boost
             let currentViewers = Math.floor(Math.random() * 20) + 10;
             
             const interval = setInterval(() => {
@@ -342,119 +335,117 @@ app.get('/api/live/sessions', (req, res) => {
     res.json({ success: true, sessions: list });
 });
 
-// APIs Hiện tại của Hệ thống[cite: 1]
 app.get('/api/slaves', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });[cite: 1]
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     let slavesList = [];
-    activeSlaves.forEach((client) => {[cite: 1]
+    activeSlaves.forEach((client) => {
         slavesList.push({
-            id: client.id,[cite: 1]
-            name: client.name,[cite: 1]
-            role: client.role,[cite: 1]
-            isOnLive: client.isOnLive,[cite: 1]
-            url: client.url,[cite: 1]
-            lastSeen: new Date(client.lastSeen).toLocaleTimeString('vi-VN')[cite: 1]
+            id: client.id,
+            name: client.name,
+            role: client.role,
+            isOnLive: client.isOnLive,
+            url: client.url,
+            lastSeen: new Date(client.lastSeen).toLocaleTimeString('vi-VN')
         });
     });
-    res.end(JSON.stringify(slavesList, null, 2));[cite: 1]
+    res.end(JSON.stringify(slavesList, null, 2));
 });
 
 app.get('/api/bots', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });[cite: 1]
-    res.end(JSON.stringify(Array.from(activeBots.values()), null, 2));[cite: 1]
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(Array.from(activeBots.values()), null, 2));
 });
 
 app.get('/send-command', (req, res) => {
-    const cmd = req.query.cmd || 'ĐIỂM DANH + SC88 +';[cite: 1]
+    const cmd = req.query.cmd || 'ĐIỂM DANH + SC88 +';
     let count = 0;
-    wss.clients.forEach((client) => {[cite: 1]
-        if (client.readyState === WebSocket.OPEN) {[cite: 1]
-            client.send(JSON.stringify({ action: `CHAT|${cmd}` }));[cite: 1]
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ action: `CHAT|${cmd}` }));
             count++;
         }
     });
-    res.send(`🚀 Đã phát lệnh thành công cho ${count} thiết bị: [ ${cmd} ]`);[cite: 1]
+    res.send(`🚀 Đã phát lệnh thành công cho ${count} thiết bị: [ ${cmd} ]`);
 });
 
-// WebSocket Event Listener[cite: 1]
 wss.on('connection', (ws) => {
-    clients.add(ws);[cite: 1]
-    ws.isAlive = true;[cite: 1]
-    let currentSlaveId = null;[cite: 1]
+    clients.add(ws);
+    ws.isAlive = true;
+    let currentSlaveId = null;
     
-    console.log('[WS] Client đã kết nối thành công.');[cite: 1]
+    console.log('[WS] Client đã kết nối thành công.');
     
     ws.send(JSON.stringify({ 
-        type: 'INIT_STATE',[cite: 1]
+        type: 'INIT_STATE', 
         data: {
-            botCount: activeBots.size,[cite: 1]
-            slaveCount: activeSlaves.size,[cite: 1]
+            botCount: activeBots.size,
+            slaveCount: activeSlaves.size,
             liveCount: activeLiveMonitors.size
         },
-        message: 'Kết nối thành công tới WebSocket Hub!'[cite: 1]
+        message: 'Kết nối thành công tới WebSocket Hub!' 
     }));
 
-    ws.on('pong', () => { ws.isAlive = true; });[cite: 1]
+    ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (message) => {
         try {
-            const data = JSON.parse(message);[cite: 1]
-            const now = Date.now();[cite: 1]
-            console.log('[WS RECV]:', data);[cite: 1]
+            const data = JSON.parse(message);
+            const now = Date.now();
+            console.log('[WS RECV]:', data);
 
             if (data.type === 'PING') {
-                ws.send(JSON.stringify({ type: 'PONG', timestamp: data.timestamp }));[cite: 1]
+                ws.send(JSON.stringify({ type: 'PONG', timestamp: data.timestamp }));
                 return;
             }
 
             if (data.action === 'SYNC_REGISTER_TAB') {
-                currentSlaveId = data.value?.id || ('slave_' + Math.random().toString(36).substring(2, 8));[cite: 1]
-                ws.slaveId = currentSlaveId;[cite: 1]
+                currentSlaveId = data.value?.id || ('slave_' + Math.random().toString(36).substring(2, 8));
+                ws.slaveId = currentSlaveId;
                 activeSlaves.set(currentSlaveId, {
-                    ws: ws, id: currentSlaveId,[cite: 1]
-                    name: data.value?.name || 'Khách',[cite: 1]
-                    role: data.value?.role || 'VIP_BOT',[cite: 1]
-                    isOnLive: 1, url: '', lastSeen: now[cite: 1]
+                    ws: ws, id: currentSlaveId,
+                    name: data.value?.name || 'Khách',
+                    role: data.value?.role || 'VIP_BOT',
+                    isOnLive: 1, url: '', lastSeen: now
                 });
             } else if (data.action === 'SYNC_STATUS') {
-                currentSlaveId = data.slaveId;[cite: 1]
-                if (activeSlaves.has(currentSlaveId)) {[cite: 1]
-                    let slave = activeSlaves.get(currentSlaveId);[cite: 1]
-                    slave.name = data.nickname || slave.name;[cite: 1]
-                    slave.isOnLive = data.is_on_live;[cite: 1]
-                    slave.url = data.url;[cite: 1]
-                    slave.lastSeen = now;[cite: 1]
+                currentSlaveId = data.slaveId;
+                if (activeSlaves.has(currentSlaveId)) {
+                    let slave = activeSlaves.get(currentSlaveId);
+                    slave.name = data.nickname || slave.name;
+                    slave.isOnLive = data.is_on_live;
+                    slave.url = data.url;
+                    slave.lastSeen = now;
                 }
             } else if (data.action === 'CREATE_BOT') {
                 activeBots.set(data.botId, {
-                    botId: data.botId,[cite: 1]
-                    account: data.account,[cite: 1]
-                    status: data.status || 'RUNNING',[cite: 1]
-                    timestamp: data.timestamp || new Date().toLocaleTimeString('vi-VN')[cite: 1]
+                    botId: data.botId,
+                    account: data.account,
+                    status: data.status || 'RUNNING',
+                    timestamp: data.timestamp || new Date().toLocaleTimeString('vi-VN')
                 });
-                console.log(`[BOT CREATED] ID: ${data.botId} | Acc: ${data.account}`);[cite: 1]
-                broadcastToAll({ type: 'BOT_COUNT_UPDATED', count: activeBots.size });[cite: 1]
+                console.log(`[BOT CREATED] ID: ${data.botId} | Acc: ${data.account}`);
+                broadcastToAll({ type: 'BOT_COUNT_UPDATED', count: activeBots.size });
             }
 
-            wss.clients.forEach((client) => {[cite: 1]
-                if (client !== ws && client.readyState === WebSocket.OPEN) {[cite: 1]
-                    client.send(JSON.stringify({ type: 'BROADCAST', data }));[cite: 1]
+            wss.clients.forEach((client) => {
+                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'BROADCAST', data }));
                 }
             });
         } catch (e) {
-            console.error('[WS ERROR]: Lỗi xử lý message', e);[cite: 1]
+            console.error('[WS ERROR]: Lỗi xử lý message', e);
         }
     });
 
     ws.on('close', () => {
-        clients.delete(ws);[cite: 1]
-        if (ws.slaveId && activeSlaves.has(ws.slaveId)) {[cite: 1]
-            activeSlaves.delete(ws.slaveId);[cite: 1]
+        clients.delete(ws);
+        if (ws.slaveId && activeSlaves.has(ws.slaveId)) {
+            activeSlaves.delete(ws.slaveId);
         }
-        console.log('[WS] Client đã ngắt kết nối.');[cite: 1]
+        console.log('[WS] Client đã ngắt kết nối.');
     });
 });
 
 server.listen(PORT, () => {
-    console.log(`🚀 [HENDY SERVER HUB] Đang chạy tại cổng: ${PORT}`);[cite: 1]
+    console.log(`🚀 [HENDY SERVER HUB] Đang chạy tại cổng: ${PORT}`);
 });
