@@ -1,34 +1,169 @@
-const WebSocket = require('ws');
-const http = require('http');
 const express = require('express');
+const http = require('http');
 const path = require('path');
+const WebSocket = require('ws');
+const { Server } = require('socket.io');
 const { WebcastPushConnection } = require('tiktok-live-connector');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-const clients = new Set();
-const activeSlaves = new Map();
-const activeBots = new Map();
-const activeLiveMonitors = new Map();
+// --- WebSocket Dual-Engine Setup ---
+// Native WebSocket Server cho Slave/Bot Hub (đường dẫn /ws)
+const wss = new WebSocket.Server({ noServer: true });
+
+// Socket.IO Server cho Control Panel Interface (đường dẫn /socket.io)
+const io = new Server(server, { cors: { origin: '*' }, pingInterval: 5000, pingTimeout: 2000 });
+
+// Phân luồng HTTP Upgrade request giữa WS và Socket.IO
+server.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+    if (pathname === '/socket.io/') {
+        // Socket.IO tự xử lý upgrade
+        return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+    });
+});
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
+// ==========================================
+// 💾 IN-MEMORY DATABASE & STATE STORAGE
+// ==========================================
+let users = [
+    { id: 1, username: 'admin_hades', name: 'Hades Admin', role: 'SuperAdmin', status: 'Active' },
+    { id: 2, username: 'hendy_op', name: 'Hendy Operator', role: 'Operator', status: 'Active' },
+    { id: 3, username: 'viewer_01', name: 'Guest Viewer', role: 'Viewer', status: 'Inactive' }
+];
+
+const activeSlaves = new Map();
+const activeBots = new Map();
+const activeLiveMonitors = new Map();
+
+// Global Broadcast helper (cho cả Native WS lẫn Socket.IO)
 function broadcastToAll(data) {
     const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    
+    // Broadcast tới tất cả client Native WebSocket
     wss.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(payload);
         }
     });
+
+    // Broadcast tới tất cả client Socket.IO (Dashboard UI)
+    io.emit('system_broadcast', typeof data === 'string' ? JSON.parse(data) : data);
 }
+
+// ==========================================
+// 🛡️ MIDDLEWARE: RBAC AUTHORIZATION
+// ==========================================
+const authorize = (allowedRoles) => {
+    return (req, res, next) => {
+        const userRole = req.headers['x-user-role'] || 'Viewer';
+        if (!allowedRoles.includes(userRole)) {
+            return res.status(403).json({ success: false, message: 'Quyền truy cập bị từ chối (403 Forbidden)' });
+        }
+        next();
+    };
+};
+
+// ==========================================
+// 👤 REST API: QUẢN LÝ NGƯỜI DÙNG (CRUD)
+// ==========================================
+app.get('/api/v1/users', authorize(['SuperAdmin', 'Operator', 'Viewer']), (req, res) => {
+    res.json({ success: true, data: users });
+});
+
+app.post('/api/v1/users', authorize(['SuperAdmin']), (req, res) => {
+    const { username, name, role } = req.body;
+    if (!username || !role) return res.status(400).json({ success: false, message: 'Thiếu thông tin người dùng' });
+    const newUser = { id: Date.now(), username, name: name || username, role, status: 'Active' };
+    users.push(newUser);
+    io.emit('user_updated', { action: 'CREATE', user: newUser });
+    res.status(201).json({ success: true, data: newUser });
+});
+
+app.put('/api/v1/users/:id', authorize(['SuperAdmin']), (req, res) => {
+    const { id } = req.params;
+    const { name, role, status } = req.body;
+    const index = users.findIndex(u => u.id == id);
+    if (index === -1) return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+
+    users[index] = { 
+        ...users[index], 
+        name: name || users[index].name, 
+        role: role || users[index].role, 
+        status: status || users[index].status 
+    };
+    io.emit('user_updated', { action: 'UPDATE', user: users[index] });
+    res.json({ success: true, data: users[index] });
+});
+
+app.delete('/api/v1/users/:id', authorize(['SuperAdmin']), (req, res) => {
+    const { id } = req.params;
+    users = users.filter(u => u.id != id);
+    io.emit('user_updated', { action: 'DELETE', id: Number(id) });
+    res.json({ success: true, message: 'Xóa người dùng thành công' });
+});
+
+// ==========================================
+// 📊 REST API: HỆ THỐNG & MONITORING
+// ==========================================
+app.get('/api/v1/system/status', (req, res) => {
+    res.json({
+        success: true,
+        data: {
+            system: 'Master Control Panel - Hendy & Hades V6100 Pro',
+            uptime: Math.floor(process.uptime()),
+            activeBots: activeBots.size,
+            activeSlaves: activeSlaves.size,
+            activeLiveSessions: activeLiveMonitors.size,
+            totalUsers: users.length
+        }
+    });
+});
+
+app.get('/api/slaves', (req, res) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    const slavesList = [];
+    activeSlaves.forEach((client) => {
+        slavesList.push({
+            id: client.id,
+            name: client.name,
+            role: client.role,
+            isOnLive: client.isOnLive,
+            url: client.url,
+            lastSeen: new Date(client.lastSeen).toLocaleTimeString('vi-VN')
+        });
+    });
+    res.send(JSON.stringify(slavesList, null, 2));
+});
+
+app.get('/api/bots', (req, res) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(JSON.stringify(Array.from(activeBots.values()), null, 2));
+});
+
+app.get('/send-command', (req, res) => {
+    const cmd = req.query.cmd || 'ĐIỂM DANH + SC88 +';
+    let count = 0;
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ action: `CHAT|${cmd}` }));
+            count++;
+        }
+    });
+    res.send(`🚀 Đã phát lệnh thành công cho ${count} thiết bị: [ ${cmd} ]`);
+});
 
 // ==========================================
 // 🤖 AI MANAGER ENGINE
@@ -335,46 +470,15 @@ app.get('/api/live/sessions', (req, res) => {
     res.json({ success: true, sessions: list });
 });
 
-app.get('/api/slaves', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    let slavesList = [];
-    activeSlaves.forEach((client) => {
-        slavesList.push({
-            id: client.id,
-            name: client.name,
-            role: client.role,
-            isOnLive: client.isOnLive,
-            url: client.url,
-            lastSeen: new Date(client.lastSeen).toLocaleTimeString('vi-VN')
-        });
-    });
-    res.end(JSON.stringify(slavesList, null, 2));
-});
-
-app.get('/api/bots', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(Array.from(activeBots.values()), null, 2));
-});
-
-app.get('/send-command', (req, res) => {
-    const cmd = req.query.cmd || 'ĐIỂM DANH + SC88 +';
-    let count = 0;
-    wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ action: `CHAT|${cmd}` }));
-            count++;
-        }
-    });
-    res.send(`🚀 Đã phát lệnh thành công cho ${count} thiết bị: [ ${cmd} ]`);
-});
-
+// ==========================================
+// 🔌 REALTIME ENGINE 1: NATIVE WEBSOCKET (SLAVE & BOT HUB)
+// ==========================================
 wss.on('connection', (ws) => {
-    clients.add(ws);
     ws.isAlive = true;
     let currentSlaveId = null;
-    
-    console.log('[WS] Client đã kết nối thành công.');
-    
+
+    console.log('[WS] Slave/Device client đã kết nối.');
+
     ws.send(JSON.stringify({ 
         type: 'INIT_STATE', 
         data: {
@@ -391,7 +495,6 @@ wss.on('connection', (ws) => {
         try {
             const data = JSON.parse(message);
             const now = Date.now();
-            console.log('[WS RECV]:', data);
 
             if (data.type === 'PING') {
                 ws.send(JSON.stringify({ type: 'PONG', timestamp: data.timestamp }));
@@ -423,7 +526,6 @@ wss.on('connection', (ws) => {
                     status: data.status || 'RUNNING',
                     timestamp: data.timestamp || new Date().toLocaleTimeString('vi-VN')
                 });
-                console.log(`[BOT CREATED] ID: ${data.botId} | Acc: ${data.account}`);
                 broadcastToAll({ type: 'BOT_COUNT_UPDATED', count: activeBots.size });
             }
 
@@ -438,14 +540,53 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
-        clients.delete(ws);
         if (ws.slaveId && activeSlaves.has(ws.slaveId)) {
             activeSlaves.delete(ws.slaveId);
         }
-        console.log('[WS] Client đã ngắt kết nối.');
+        console.log('[WS] Slave Client ngắt kết nối.');
     });
 });
 
+// ==========================================
+// ⚡ REALTIME ENGINE 2: SOCKET.IO (DASHBOARD LATENCY & EVENT SYNC)
+// ==========================================
+io.on('connection', (socket) => {
+    console.log(`[Socket.IO] Admin Panel kết nối: ${socket.id}`);
+
+    socket.on('latency_ping', (timestamp) => {
+        socket.emit('latency_pong', timestamp);
+    });
+
+    socket.on('toggle_bot', (botId) => {
+        if (activeBots.has(botId)) {
+            const bot = activeBots.get(botId);
+            bot.status = bot.status === 'RUNNING' ? 'STOPPED' : 'RUNNING';
+            io.emit('bot_updated', Array.from(activeBots.values()));
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`[Socket.IO] Admin Panel ngắt kết nối: ${socket.id}`);
+    });
+});
+
+// Heartbeat kiểm tra kết nối đứt đối với Native WS
+setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) return ws.terminate();
+        ws.isAlive = false;
+        ws.ping();
+    });
+}, 30000);
+
+// ==========================================
+// 🚀 SERVER INITIALIZATION
+// ==========================================
 server.listen(PORT, () => {
-    console.log(`🚀 [HENDY SERVER HUB] Đang chạy tại cổng: ${PORT}`);
+    console.log(`===================================================`);
+    console.log(`🚀 MASTER CONTROL PANEL - HENDY & HADES V6100 PRO`);
+    console.log(`📡 Server đang chạy trên port: ${PORT}`);
+    console.log(`🔗 Web Dashboard: http://localhost:${PORT}`);
+    console.log(`⚡ WebSocket Endpoint: ws://localhost:${PORT}/ws`);
+    console.log(`===================================================`);
 });
